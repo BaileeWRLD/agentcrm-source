@@ -1,7 +1,7 @@
 # AgentCRM — Claude Instructions
 
 ## After every code change
-Always run `node deploy.js` from `/Users/seymorecash/agent-crm/`. Do NOT run `npm run dist` or open DMGs. Deploy script handles everything:
+Always run `node deploy.js` from the project root. Do NOT run `npm run dist` or open DMGs. Deploy script handles everything:
 - Auto-bumps patch version
 - Rebuilds React bundle
 - Packs and installs new app.asar directly to /Applications/AgentCRM.app

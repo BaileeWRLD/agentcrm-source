@@ -15,7 +15,7 @@ const INSTALLED_APP = '/Applications/AgentCRM.app';
 const ASAR_DEST     = path.join(INSTALLED_APP, 'Contents/Resources/app.asar');
 const ASAR_SRC      = path.join(__dirname, 'dist/mac/AgentCRM.app/Contents/Resources/app.asar');
 const ASAR_TMP      = path.join(require('os').tmpdir(), 'app.asar');
-const GITHUB_REPO   = 'sockhead360/agentcrm-releases';
+const GITHUB_REPO   = 'YOUR-GITHUB-USERNAME/YOUR-RELEASES-REPO'; // replace with your own
 
 // ── 1. Bump patch version ──────────────────────────────────────────────────
 const pkg             = JSON.parse(fs.readFileSync(PKG_PATH, 'utf8'));

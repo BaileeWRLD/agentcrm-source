@@ -3,7 +3,7 @@ const originalFs = require('original-fs');
 const path = require('path');
 const { app, net } = require('electron');
 
-const RELEASES_API = 'https://api.github.com/repos/sockhead360/agentcrm-releases/releases/latest';
+const RELEASES_API = 'https://api.github.com/repos/YOUR-GITHUB-USERNAME/YOUR-RELEASES-REPO/releases/latest'; // replace with your own
 
 function httpsGet(url) {
   return new Promise((resolve, reject) => {
