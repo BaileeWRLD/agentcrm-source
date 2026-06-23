@@ -77,7 +77,6 @@ function log(...args) {
 }
 
 // ── Phone Extension Filter ────────────────────────────────────────────────────
-// Brokerage/office numbers often include extensions — they can't receive SMS
 function hasPhoneExtension(raw) {
   return /\b(ext\.?|extension)\s*\d+|\bx\d+\b/i.test(raw);
 }
@@ -142,9 +141,9 @@ function detectColumnMap(headers) {
 const TITLE_CASE_PRESERVE = new Set(['III','IV','VI','VII','VIII','IX','XI','XII','LLC','INC','PA','LP','LLP','PLLC','SR','JR']);
 function toTitleCase(str) {
   return str.replace(/\S+/g, w => {
-    if (w !== w.toUpperCase()) return w;          // already mixed-case, leave it
-    if (w.length <= 2) return w;                  // initials like JJ, DJ, AJ
-    if (TITLE_CASE_PRESERVE.has(w)) return w;     // III, LLC, Inc, etc.
+    if (w !== w.toUpperCase()) return w;
+    if (w.length <= 2) return w;
+    if (TITLE_CASE_PRESERVE.has(w)) return w;
     return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
   });
 }
@@ -210,7 +209,6 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'public', 'index.html'));
 
-  // Spell-check context menu: shows suggestions on right-click / ctrl-click
   mainWindow.webContents.on('context-menu', (e, params) => {
     const menu = new Menu();
     if (params.misspelledWord) {
@@ -257,7 +255,6 @@ app.whenReady().then(() => {
     log('DB init error:', e.message);
   }
 
-  // Set dock icon explicitly for dev mode
   if (app.dock) {
     const { nativeImage } = require('electron');
     const dockIcon = nativeImage.createFromPath(path.join(__dirname, 'build', 'icon.icns'));
@@ -267,7 +264,6 @@ app.whenReady().then(() => {
   createWindow();
   startPolling();
   updateBadge();
-  // Poll immediately on startup to catch any messages missed during downtime
   setTimeout(pollTwilio, 5000);
   playSound('welcome');
 
@@ -283,7 +279,7 @@ app.on('before-quit', (e) => {
     isQuitting = true;
     const proc = execFile('afplay', [path.join(SOUNDS_DIR, 'goodbye.wav')]);
     proc.on('close', () => app.quit());
-    setTimeout(() => app.quit(), 3000); // safety bail-out
+    setTimeout(() => app.quit(), 3000);
   }
 });
 
@@ -326,7 +322,6 @@ async function classifyAsNoResponse(messageBody, apiKey) {
   const dbExamples = db.getColdMessageExamples();
   const client = new Anthropic({ apiKey });
 
-  // Dedupe DB examples against seed so the prompt stays clean
   const seedSet = new Set(SEED_NO_EXAMPLES);
   const extraExamples = dbExamples.filter(ex => !seedSet.has(ex));
   const allExamples = [...SEED_NO_EXAMPLES, ...extraExamples];
@@ -350,7 +345,6 @@ function startPolling() {
   pollInterval = setInterval(pollTwilio, 30000);
 }
 
-// TCPA opt-out keywords — must be treated as immediate unsubscribe
 const STOP_WORDS = new Set(['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT']);
 
 async function pollTwilio() {
@@ -366,11 +360,6 @@ async function pollTwilio() {
     log(`Poll: ${messages.length} inbound messages fetched from Twilio`);
     const myNumber = twilio.normalizePhone(settings.phoneNumber);
 
-    // ── ISOLATION LAYER 2: batch filter before anything is processed ──────────
-    // Layer 1 is the Twilio API query (To: myNumber). This is an independent
-    // client-side filter that runs on the full result before any DB or contact
-    // logic is touched. Any message not addressed to exactly this app's number
-    // is discarded here and never enters the system.
     const blocked = messages.filter(m => twilio.normalizePhone(m.to) !== myNumber);
     if (blocked.length > 0) {
       log(`ISOLATION: Blocked ${blocked.length} message(s) addressed to wrong number: ${[...new Set(blocked.map(m => m.to))].join(', ')}`);
@@ -379,13 +368,10 @@ async function pollTwilio() {
 
     let newMessages = 0;
     for (const msg of safeMessages) {
-      // ── ISOLATION LAYER 3: per-message guard inside the loop ─────────────────
-      // Redundant after Layer 2 but acts as a final independent hard stop.
       if (twilio.normalizePhone(msg.to) !== myNumber) {
         log(`ISOLATION LAYER 3 TRIGGERED: Blocked SID=${msg.sid} — this should never occur`);
         continue;
       }
-      // TCPA compliance: detect STOP and permanently blacklist
       const bodyClean = msg.body.trim().toUpperCase().replace(/[^A-Z]/g, '');
       if (STOP_WORDS.has(bodyClean)) {
         db.addStoppedNumber(msg.from);
@@ -406,7 +392,6 @@ async function pollTwilio() {
         mediaPaths = await downloadMessageMedia(settings, msg.sid);
       }
       const wasNew = db.addMessage(conv.id, msg.body, 'inbound', msg.sid, mediaPaths);
-      // Auto-unarchive only when a genuinely new message arrives (not already-seen duplicates)
       if (wasNew && conv.archived) db.unarchiveConversation(conv.id);
       if (wasNew) {
         log(`Poll: new message from ${msg.from} (${contact.name})`);
@@ -427,13 +412,11 @@ async function pollTwilio() {
           }
         }
 
-        // Whitelisted test numbers always reset to 'new' so they can be re-tested repeatedly
         if (db.isPhoneWhitelisted(msg.from) && conv.category !== 'new') {
           db.updateConversationCategory(conv.id, 'new');
           conv.category = 'new';
         }
 
-        // AI auto-sort: classify new conversations only
         if (settings.aiEnabled === 'true' && settings.claudeApiKey && conv.category === 'new') {
           try {
             const isNo = await classifyAsNoResponse(msg.body, settings.claudeApiKey);
@@ -461,8 +444,6 @@ async function pollTwilio() {
 }
 
 // ── Centralized Send Guard ────────────────────────────────────────────────────
-// Every real Twilio send must pass through this. Throws with a descriptive
-// error if any gate fails. Call before every individual send attempt.
 
 function assertCanSend(phone, settings, { skipDailyCapCheck = false } = {}) {
   if (settings.liveSmsEnabled !== 'true') {
@@ -511,8 +492,7 @@ ipcMain.handle('dialog:openFile', async () => {
   const columnMap = detectColumnMap(parsed.headers);
   return { filePath, headers: parsed.headers, rows: parsed.rows.slice(0, 5), columnMap, totalRows: parsed.rows.length };
 });
-ipcMain.handl
-});
+
 ipcMain.handle('csv:import', async (_, { filePath, listName, columnMap }) => {
   const content = fs.readFileSync(filePath, 'utf-8');
   const { rows } = parseCSV(content);
@@ -547,8 +527,7 @@ ipcMain.handle('campaigns:blast', async (_, campaignId) => {
   const hardMax = 10000;
   const dailyCap = Math.min(parseInt(settings.dailyCap || '10000', 10), hardMax);
 
-  // ── Pre-flight: all gates checked via shared guard ─────────────────────
-  assertCanSend('+15550000000', settings, { skipDailyCapCheck: true }); // validate lock/A2P/kill/creds with dummy phone
+  assertCanSend('+15550000000', settings, { skipDailyCapCheck: true });
   const dailyUsed = db.getDailyCount();
   if (dailyUsed >= dailyCap) {
     throw new Error(`Daily send cap of ${dailyCap} reached (${dailyUsed} sent today). Resets at midnight.`);
@@ -577,7 +556,7 @@ ipcMain.handle('campaigns:blast', async (_, campaignId) => {
   const CONSECUTIVE_FAIL_LIMIT = 5;
   const FAILURE_RATE_CHECK_AT = 25;
   const FAILURE_RATE_MAX = 0.10;
-  const phonesSeenThisBlast = new Set(); // phone-level dedup within this blast run
+  const phonesSeenThisBlast = new Set();
 
   const autoPause = (reason) => {
     db.updateCampaignStatus(campaignId, 'paused');
@@ -591,7 +570,6 @@ ipcMain.handle('campaigns:blast', async (_, campaignId) => {
   for (const contact of cappedContacts) {
     if (blastCancelled) break;
 
-    // Re-read kill switch from DB on every iteration (catches mid-blast activation)
     if (db.getSetting('killSwitch') === 'true') {
       autoPause('kill switch activated mid-blast');
       return { sent, failed, autoPaused: true };
@@ -599,14 +577,12 @@ ipcMain.handle('campaigns:blast', async (_, campaignId) => {
 
     const phone = twilio.normalizePhone(contact.phone);
 
-    // Fast-path in-memory dedup (same phone seen earlier in this run)
     if (phone && phonesSeenThisBlast.has(phone) && !db.isPhoneWhitelisted(phone)) {
       log(`Skipping in-memory duplicate phone ${phone}`);
       db.logAudit('sms_dedup_memory', { campaignId, contactId: contact.id, phone });
       continue;
     }
 
-    // Durable DB-level dedup: phone already sent in this campaign across any run/restart
     if (phone && db.isPhoneSentInCampaign(campaignId, phone) && !db.isPhoneWhitelisted(phone)) {
       log(`Skipping DB duplicate phone ${phone} (already sent in campaign ${campaignId})`);
       db.logAudit('sms_dedup_db', { campaignId, contactId: contact.id, phone });
@@ -616,7 +592,6 @@ ipcMain.handle('campaigns:blast', async (_, campaignId) => {
 
     if (phone) phonesSeenThisBlast.add(phone);
 
-    // Per-contact guard: opt-out, phone validity, live lock, A2P
     try {
       assertCanSend(phone, settings, { skipDailyCapCheck: true });
     } catch (guardErr) {
@@ -649,7 +624,6 @@ ipcMain.handle('campaigns:blast', async (_, campaignId) => {
       }
     }
 
-    // 10% failure rate check (after first 25 attempts)
     const total = sent + failed;
     if (total >= FAILURE_RATE_CHECK_AT && failed / total > FAILURE_RATE_MAX) {
       autoPause(`failure rate ${Math.round(failed / total * 100)}% exceeds 10% threshold after ${total} sends`);
@@ -879,7 +853,6 @@ ipcMain.handle('campaigns:refreshStats', async (_, campaignId) => {
 
 ipcMain.handle('campaigns:delete', (_, campaignId) => { db.deleteCampaign(campaignId); return true; });
 
-
 ipcMain.handle('conversations:getAll', () => db.getConversations());
 ipcMain.handle('conversations:getMessages', (_, convId) => db.getMessages(convId));
 ipcMain.handle('conversations:markRead', (_, convId) => { db.markConversationRead(convId); updateBadge(); return true; });
@@ -903,7 +876,6 @@ ipcMain.handle('conversations:sendMessage', async (_, { convId, body }) => {
   const settings = db.getAllSettings();
   log(`sendMessage: convId=${convId} liveSms=${settings.liveSmsEnabled} a2p=${settings.a2pApproved} kill=${settings.killSwitch} hasSid=${!!settings.accountSid} hasToken=${!!settings.authToken} hasPhone=${!!settings.phoneNumber} msid=${settings.messagingServiceSid || 'none'}`);
 
-  // Demo/offline mode — no credentials configured, save locally without sending
   if (!settings.accountSid || !settings.authToken || !settings.phoneNumber) {
     log(`sendMessage: missing credentials — saving locally only`);
     db.addMessage(convId, body, 'outbound', null);
@@ -914,7 +886,6 @@ ipcMain.handle('conversations:sendMessage', async (_, { convId, body }) => {
   if (!conv) throw new Error('Conversation not found');
   log(`sendMessage: to=${conv.phone}`);
 
-  // Shared guard — same gates as campaign blasts
   assertCanSend(conv.phone, settings);
   log(`sendMessage: guard passed — calling Twilio`);
 
@@ -970,19 +941,12 @@ ipcMain.handle('twilio:getBlastCostEstimate', async (_, { segments, willSend }) 
 
   const { outboundPricePerSegment, currency, carrierCount } = pricing;
 
-  // Carrier surcharge: the Twilio Pricing API only returns Twilio's base fee.
-  // Carrier surcharges (A2P 10DLC) are flat-per-message fees NOT per-segment.
-  // We derive them from Usage Records: all-in rate minus the base Twilio rate.
-  // Usage Records "this month" reflect 1-seg messages (user confirmed fix),
-  // so: carrier_fee = all_in_per_msg - (1 × base_rate_per_seg).
-  // Fallbacks from 18k-message log analysis if no usage data available.
-  const FALLBACK_CARRIER_OUT = 0.00452; // derived from logs: $0.01282 - $0.00830
-  const FALLBACK_CARRIER_IN  = 0.00157; // derived from logs: $0.00987 - $0.00830
+  const FALLBACK_CARRIER_OUT = 0.00452;
+  const FALLBACK_CARRIER_IN  = 0.00157;
   const FALLBACK_ALLIN_IN    = 0.00987;
 
   let carrierFeePerOutboundMsg, allInInboundPerMsg, usagePeriod, usageMsgCount;
   if (usage.allInOutboundPerMsg !== null) {
-    // carrier surcharge = all-in rate (from usage records) minus Twilio's base rate (1-seg)
     carrierFeePerOutboundMsg = Math.max(usage.allInOutboundPerMsg - outboundPricePerSegment, 0);
     allInInboundPerMsg = usage.allInInboundPerMsg ?? FALLBACK_ALLIN_IN;
     usagePeriod = usage.period;
@@ -994,14 +958,8 @@ ipcMain.handle('twilio:getBlastCostEstimate', async (_, { segments, willSend }) 
     usageMsgCount = 0;
   }
 
-  // All-in cost per outbound message = (segments × Twilio base rate) + flat carrier fee
   const allInOutboundPerMsg = segments * outboundPricePerSegment + carrierFeePerOutboundMsg;
 
-  // Conversation depth defaults from 18k-message log analysis:
-  //   Response rate: 6.7–9.2% → 8%
-  //   Avg inbound msgs per engaged contact: 2.0
-  //   Avg inbound segments per msg: 1.2 (replies are longer than "Yes" but shorter than blasts)
-  //   Avg outbound follow-up replies per engaged contact: 1.2 (beyond the blast)
   const hasHistory = convDepth.conversationCount >= 5;
   const responseRate         = 0.08;
   const avgInboundMsgs       = hasHistory ? convDepth.avgInbound              : 2.0;
@@ -1009,15 +967,12 @@ ipcMain.handle('twilio:getBlastCostEstimate', async (_, { segments, willSend }) 
 
   const estimatedReplies   = Math.round(willSend * responseRate);
 
-  // Outbound blast: (Twilio base × segments) + flat carrier fee per message
   const outboundTwilioCost  = willSend * segments * outboundPricePerSegment;
   const outboundCarrierCost = willSend * carrierFeePerOutboundMsg;
   const outboundBlastCost   = outboundTwilioCost + outboundCarrierCost;
 
-  // Inbound replies: use all-in rate from usage records (already includes carrier fees)
   const inboundReplyCost = estimatedReplies * avgInboundMsgs * allInInboundPerMsg;
 
-  // Our follow-up outbound replies (manual, 1-segment each)
   const replyTwilioCost  = estimatedReplies * avgOutboundFollowups * outboundPricePerSegment;
   const replyCarrierCost = estimatedReplies * avgOutboundFollowups * carrierFeePerOutboundMsg;
   const outboundReplyCost = replyTwilioCost + replyCarrierCost;
@@ -1025,7 +980,6 @@ ipcMain.handle('twilio:getBlastCostEstimate', async (_, { segments, willSend }) 
   const totalEstimate = outboundBlastCost + inboundReplyCost + outboundReplyCost;
 
   return {
-    // Rates
     outboundPricePerSegment,
     carrierFeePerOutboundMsg,
     allInOutboundPerMsg,
@@ -1034,7 +988,6 @@ ipcMain.handle('twilio:getBlastCostEstimate', async (_, { segments, willSend }) 
     carrierCount,
     usagePeriod,
     usageMsgCount,
-    // Blast params
     willSend,
     segments,
     responseRate,
@@ -1042,7 +995,6 @@ ipcMain.handle('twilio:getBlastCostEstimate', async (_, { segments, willSend }) 
     avgInboundMsgs,
     avgOutboundFollowups,
     conversationSampleSize: convDepth.conversationCount,
-    // Cost breakdown
     outboundTwilioCost,
     outboundCarrierCost,
     outboundBlastCost,
@@ -1086,6 +1038,7 @@ ipcMain.handle('settings:get', () => {
   if (s.claudeApiKey) s.claudeApiKey = '••••••••••••••••••••••••••••••••';
   return s;
 });
+
 ipcMain.handle('settings:save', (_, settings) => {
   if (!settings.authToken || settings.authToken.startsWith('••')) {
     delete settings.authToken;
@@ -1101,10 +1054,12 @@ ipcMain.handle('settings:save', (_, settings) => {
 });
 
 ipcMain.handle('overview:getStats', (_, period) => db.getOverviewStats(period));
+
 ipcMain.handle('dnc-add', async (_, phone, contactId) => {
   db.addToDNC(phone, contactId);
   return { success: true };
 });
+
 ipcMain.handle('contacts:rename', (_, { contactId, name }) => {
   db.renameContact(contactId, name);
   return true;
@@ -1173,14 +1128,11 @@ ipcMain.handle('lead-submit:send', async (_, { id }) => {
 
   const lines = [];
 
-  // Header
   lines.push(isUpdate ? `🔄 LEAD UPDATE — ${addr}` : `🏠 NEW LEAD — ${addr}`);
 
-  // T1 block — always included (it's the gate)
   lines.push(`Asking: ${sub.asking_price} | Off-Market: ${sub.is_off_market ? '✅ Yes' : '❌ No'}`);
   if (sub.extra1) lines.push(`Notes: ${sub.extra1}`);
 
-  // T2 block — include if any data
   const hasBeds = sub.beds || sub.baths || sub.sqft;
   if (hasBeds || sub.extra2) {
     lines.push('---');
@@ -1192,7 +1144,6 @@ ipcMain.handle('lead-submit:send', async (_, { id }) => {
     if (sub.extra2) lines.push(`Notes: ${sub.extra2}`);
   }
 
-  // Upload photos sequentially to avoid rate-limiting on the hosting service
   const mediaUrls = [];
   for (const p of photos) {
     try {
@@ -1203,7 +1154,6 @@ ipcMain.handle('lead-submit:send', async (_, { id }) => {
     }
   }
 
-  // T3 block — include if any data
   if (sub.description || sub.extra3 || photos.length > 0) {
     lines.push('---');
     if (sub.description) lines.push(`Condition: ${sub.description}`);
@@ -1212,7 +1162,6 @@ ipcMain.handle('lead-submit:send', async (_, { id }) => {
     if (failed > 0) lines.push(`Photos: ${mediaUrls.length} attached, ${failed} failed to upload`);
   }
 
-  // Send text first, then photos in batches of 3 (carrier MMS size limit)
   await twilio.sendSMS(settings.accountSid, settings.authToken, settings.phoneNumber, CHRIS_PHONE, lines.join('\n'), settings.messagingServiceSid, []);
   for (let i = 0; i < mediaUrls.length; i += 3) {
     const batch = mediaUrls.slice(i, i + 3);
