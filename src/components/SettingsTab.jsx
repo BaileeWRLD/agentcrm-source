@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import SegmentCounter from './SegmentCounter.jsx';
 import { sanitizeForGSM7, analyzeMessage } from '../utils/segments.js';
+import FollowUpSettings from './FollowUpSettings.jsx';
 
 const DEFAULT_MESSAGE = "Hey {firstName}! I'm Chris, a local investor looking for fix and flip type properties that need a value add. Do you have anything for me to look at?";
 
@@ -472,6 +473,11 @@ export default function SettingsTab({ onSave }) {
 
           </div>
         </div>
+      </div>
+
+      {/* Follow Up Messages Section */}
+      <div style={{ borderTop: '2px solid var(--border-sh)', marginTop: 0 }}>
+        <FollowUpSettings />
       </div>
     </>
   );

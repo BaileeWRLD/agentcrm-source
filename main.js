@@ -394,6 +394,8 @@ async function pollTwilio() {
       const wasNew = db.addMessage(conv.id, msg.body, 'inbound', msg.sid, mediaPaths);
       if (wasNew && conv.archived) db.unarchiveConversation(conv.id);
       if (wasNew) {
+        // Reset follow-up chain when contact replies
+        db.resetFollowUpStatus(contact.phone);
         log(`Poll: new message from ${msg.from} (${contact.name})`);
         newMessages++;
 
@@ -1058,6 +1060,85 @@ ipcMain.handle('overview:getStats', (_, period) => db.getOverviewStats(period));
 ipcMain.handle('dnc-add', async (_, phone, contactId) => {
   db.addToDNC(phone, contactId);
   return { success: true };
+});
+
+// ── Follow-up messages ────────────────────────────────────────────────────────
+
+function applyMergeTags(message, contactName) {
+  const firstName = contactName ? contactName.trim().split(' ')[0] : 'there';
+  return message.replace(/\{first\s*name\}/gi, firstName).replace(/\{firstName\}/g, firstName);
+}
+
+ipcMain.handle('followup:getTemplates', () => db.getFollowUpTemplates());
+
+ipcMain.handle('followup:setTemplate', (_, { field, value }) => {
+  db.setFollowUpTemplate(field, value);
+  return { success: true };
+});
+
+ipcMain.handle('followup:getStatus', (_, contactPhone) => db.getFollowUpStatus(contactPhone));
+
+ipcMain.handle('followup:send', async (_, { convId, contactPhone, contactName, slot }) => {
+  const templates = db.getFollowUpTemplates();
+  const raw = slot === 1 ? templates.followup1 : templates.followup2;
+  const body = applyMergeTags(raw, contactName);
+
+  const settings = db.getAllSettings();
+  if (!settings.accountSid || !settings.authToken || !settings.phoneNumber) {
+    // Save locally only (no Twilio creds)
+    db.addMessage(convId, body, 'outbound', null);
+    db.markFollowUpSent(contactPhone, slot);
+    return { success: true, body };
+  }
+
+  assertCanSend(contactPhone, settings);
+  const result = await twilio.sendSMS(
+    settings.accountSid, settings.authToken, settings.phoneNumber,
+    contactPhone, body, settings.messagingServiceSid
+  );
+  db.addMessage(convId, body, 'outbound', result.sid);
+  db.markFollowUpSent(contactPhone, slot);
+  db.logAudit(`followup${slot}_sent`, { convId, phone: contactPhone, sid: result.sid });
+  return { success: true, body };
+});
+
+ipcMain.handle('followup:getBulkFU1', () => db.getBulkFU1Contacts());
+
+ipcMain.handle('followup:getBulkFU2', (_, unlockMs) => db.getBulkFU2Contacts(unlockMs));
+
+ipcMain.handle('followup:bulkSend', async (_, { contacts, slot }) => {
+  const templates = db.getFollowUpTemplates();
+  const settings = db.getAllSettings();
+  const results = [];
+
+  for (const c of contacts) {
+    const raw = slot === 1 ? templates.followup1 : templates.followup2;
+    const body = applyMergeTags(raw, c.contact_name);
+    try {
+      // Find convId for this contact
+      const allConvs = db.getConversations();
+      const conv = allConvs.find(cv => cv.phone === c.contact_phone);
+      if (!conv) { results.push({ phone: c.contact_phone, ok: false, error: 'No conversation found' }); continue; }
+
+      if (settings.accountSid && settings.authToken && settings.phoneNumber) {
+        assertCanSend(c.contact_phone, settings);
+        const result = await twilio.sendSMS(
+          settings.accountSid, settings.authToken, settings.phoneNumber,
+          c.contact_phone, body, settings.messagingServiceSid
+        );
+        db.addMessage(conv.id, body, 'outbound', result.sid);
+        db.logAudit(`bulk_followup${slot}_sent`, { phone: c.contact_phone, sid: result.sid });
+      } else {
+        db.addMessage(conv.id, body, 'outbound', null);
+      }
+      db.markFollowUpSent(c.contact_phone, slot);
+      results.push({ phone: c.contact_phone, ok: true });
+    } catch (e) {
+      results.push({ phone: c.contact_phone, ok: false, error: e.message });
+    }
+    await new Promise(r => setTimeout(r, 200));
+  }
+  return results;
 });
 
 ipcMain.handle('contacts:rename', (_, { contactId, name }) => {

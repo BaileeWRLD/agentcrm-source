@@ -109,4 +109,13 @@ contextBridge.exposeInMainWorld('api', {
 
   // DNC
   dncAdd: (phone, contactId) => ipcRenderer.invoke('dnc-add', phone, contactId),
+
+  // Follow-up messages
+  getFollowUpTemplates: () => ipcRenderer.invoke('followup:getTemplates'),
+  setFollowUpTemplate: (field, value) => ipcRenderer.invoke('followup:setTemplate', { field, value }),
+  getFollowUpStatus: (contactPhone) => ipcRenderer.invoke('followup:getStatus', contactPhone),
+  sendFollowUp: (data) => ipcRenderer.invoke('followup:send', data),
+  getBulkFU1Contacts: () => ipcRenderer.invoke('followup:getBulkFU1'),
+  getBulkFU2Contacts: (unlockMs) => ipcRenderer.invoke('followup:getBulkFU2', unlockMs),
+  bulkSendFollowUp: (data) => ipcRenderer.invoke('followup:bulkSend', data),
 });

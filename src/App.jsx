@@ -6,11 +6,13 @@ import ConversationsTab from './components/ConversationsTab.jsx';
 import NotesTab from './components/NotesTab.jsx';
 import SubmitLeadTab from './components/SubmitLeadTab.jsx';
 import SettingsTab from './components/SettingsTab.jsx';
+import BulkFollowUp from './components/BulkFollowUp.jsx';
 
 const MENU_ITEMS = [
   { id: 'leads',         label: 'Leads'         },
   { id: 'campaigns',     label: 'Campaigns'     },
   { id: 'conversations', label: 'Conversations' },
+  { id: 'followup',      label: 'Follow Up'     },
   { id: 'submit-lead',   label: 'Submit a Lead' },
   { id: 'notes',         label: 'Notes'         },
   { id: 'settings',      label: 'Settings'      },
@@ -144,6 +146,7 @@ export default function App() {
           )}
           {tab === 'notes' && <NotesTab />}
           {tab === 'submit-lead' && <SubmitLeadTab />}
+          {tab === 'followup' && <BulkFollowUp />}
           {tab === 'settings' && (
             <SettingsTab onSave={() => { loadSettings(); setCampaignsReloadKey(k => k + 1); }} />
           )}

@@ -54,6 +54,9 @@ export default function ChatWindow({ conversation, onCategoryChange, onMessageSe
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState('');
   const [forwardEnabled, setForwardEnabled] = useState(!!conversation.forward_enabled);
+  const [fuStatus, setFuStatus] = useState({ followup1_sent_at: null, followup2_sent_at: null });
+  const [fuTemplates, setFuTemplates] = useState({ followup1: '', followup2: '', unlock_days: 1 });
+  const [fu2Countdown, setFu2Countdown] = useState('');
   const messagesEndRef = useRef(null);
   const messagesListRef = useRef(null);
   const shouldAutoScrollRef = useRef(true);
@@ -88,6 +91,33 @@ export default function ChatWindow({ conversation, onCategoryChange, onMessageSe
     setForwardEnabled(!!conversation.forward_enabled);
   }, [conversation.id, conversation.forward_enabled]);
 
+  // Load follow-up status and templates when conversation changes
+  useEffect(() => {
+    if (!conversation.phone) return;
+    window.api.getFollowUpStatus(conversation.phone).then(setFuStatus);
+    window.api.getFollowUpTemplates().then(setFuTemplates);
+  }, [conversation.id, conversation.phone]);
+
+  // Live countdown for FU2 unlock
+  useEffect(() => {
+    if (!fuStatus.followup1_sent_at || fuStatus.followup2_sent_at) {
+      setFu2Countdown('');
+      return;
+    }
+    const unlockMs = fuTemplates.unlock_days * 24 * 60 * 60 * 1000;
+    const unlockAt = fuStatus.followup1_sent_at + unlockMs;
+    const tick = () => {
+      const remaining = unlockAt - Date.now();
+      if (remaining <= 0) { setFu2Countdown(''); return; }
+      const hrs = Math.floor(remaining / 3600000);
+      const mins = Math.floor((remaining % 3600000) / 60000);
+      setFu2Countdown(`${hrs}h ${mins}m`);
+    };
+    tick();
+    const interval = setInterval(tick, 60000);
+    return () => clearInterval(interval);
+  }, [fuStatus, fuTemplates]);
+
   const toggleForward = async () => {
     const next = !forwardEnabled;
     setForwardEnabled(next);
@@ -120,6 +150,38 @@ export default function ChatWindow({ conversation, onCategoryChange, onMessageSe
       messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
     }
   }, [messages]);
+
+  const handleFollowUp = async (slot) => {
+    const raw = slot === 1 ? fuTemplates.followup1 : fuTemplates.followup2;
+    if (!raw) return alert('No follow-up template set. Go to Settings > Follow Up Messages.');
+    const firstName = (conversation.name || '').trim().split(' ')[0] || 'there';
+    const preview = raw.replace(/\{first\s*name\}/gi, firstName).replace(/\{firstName\}/g, firstName);
+    if (!window.confirm(`Send Follow Up ${slot} to ${conversation.name || conversation.phone}?\n\n"${preview}"`)) return;
+    try {
+      await window.api.sendFollowUp({
+        convId: conversation.id,
+        contactPhone: conversation.phone,
+        contactName: conversation.name || '',
+        slot,
+      });
+      play('imsend');
+      shouldAutoScrollRef.current = true;
+      const [newStatus] = await Promise.all([
+        window.api.getFollowUpStatus(conversation.phone),
+        loadMessages(),
+      ]);
+      setFuStatus(newStatus);
+      onMessageSent?.();
+    } catch (e) {
+      alert('Follow-up send failed: ' + e.message);
+    }
+  };
+
+  const fu2Unlocked = !!(
+    fuStatus.followup1_sent_at &&
+    !fuStatus.followup2_sent_at &&
+    (Date.now() - fuStatus.followup1_sent_at >= fuTemplates.unlock_days * 24 * 60 * 60 * 1000)
+  );
 
   const handleSend = async () => {
     const body = input.trim();
@@ -312,6 +374,35 @@ export default function ChatWindow({ conversation, onCategoryChange, onMessageSe
           onClick={() => onCategoryChange(conversation.id, 'not_interested')}>
           <span className="aim-btn-icon">🚫</span>
           <span className="aim-btn-label">Cold</span>
+        </button>
+        {/* Follow Up 1 */}
+        <button
+          className="aim-btn"
+          style={{ flex: 1, opacity: fuStatus.followup1_sent_at ? 0.5 : 1 }}
+          disabled={!!fuStatus.followup1_sent_at}
+          title={fuStatus.followup1_sent_at ? 'Follow Up 1 already sent' : 'Send Follow Up 1'}
+          onClick={() => handleFollowUp(1)}
+        >
+          <span className="aim-btn-icon">{fuStatus.followup1_sent_at ? '✅' : '💬'}</span>
+          <span className="aim-btn-label">{fuStatus.followup1_sent_at ? 'FU1 Sent' : 'FU 1'}</span>
+        </button>
+        {/* Follow Up 2 */}
+        <button
+          className="aim-btn"
+          style={{ flex: 1, opacity: (fuStatus.followup2_sent_at || (!fu2Unlocked && !fuStatus.followup1_sent_at)) ? 0.5 : fu2Unlocked ? 1 : 0.65 }}
+          disabled={!fu2Unlocked}
+          title={
+            fuStatus.followup2_sent_at ? 'Follow Up 2 already sent' :
+            !fuStatus.followup1_sent_at ? 'Send Follow Up 1 first' :
+            fu2Countdown ? `Unlocks in ${fu2Countdown}` :
+            'Send Follow Up 2'
+          }
+          onClick={() => handleFollowUp(2)}
+        >
+          <span className="aim-btn-icon">{fuStatus.followup2_sent_at ? '✅' : fu2Countdown ? '⏳' : '💬'}</span>
+          <span className="aim-btn-label">
+            {fuStatus.followup2_sent_at ? 'FU2 Sent' : fu2Countdown ? fu2Countdown : 'FU 2'}
+          </span>
         </button>
 <button className="aim-btn" style={{ flex: 1, color: '#cc0000' }} title="Add to DNC list"
           onClick={async () => {

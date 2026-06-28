@@ -162,8 +162,14 @@ function PipelineRows({ convStats, onClick }) {
 }
 
 function AllFollowUpBlastModal({ preview, onConfirm, onCancel }) {
-  const [message, setMessage] = useState("Hey {firstName}, just checking back in with you. Do you have anything off-market I can look at?");
+  const [message, setMessage] = useState('');
   const [listOpen, setListOpen] = useState(false);
+
+  useEffect(() => {
+    window.api.getFollowUpTemplates().then(t => {
+      if (t?.followup1) setMessage(t.followup1);
+    }).catch(() => {});
+  }, []);
   const willSend = Math.min(preview.followUpCount, preview.dailyRemaining);
   const blocked = !preview.liveSmsEnabled || !preview.a2pApproved || preview.killSwitch || preview.followUpCount === 0;
 
@@ -1160,8 +1166,15 @@ function BlastConfirmModal({ campaign, preview, onConfirm, onCancel }) {
 const DEFAULT_FOLLOWUP_MSG = "Hey {firstName}, just checking back in with you. Do you have anything off-market I can look at?";
 
 function FollowUpBlastModal({ campaign, preview, onConfirm, onCancel }) {
-  const [message, setMessage] = useState(DEFAULT_FOLLOWUP_MSG);
+  const [message, setMessage] = useState('');
   const [listOpen, setListOpen] = useState(false);
+
+  useEffect(() => {
+    window.api.getFollowUpTemplates().then(t => {
+      if (t?.followup1) setMessage(t.followup1);
+      else setMessage(DEFAULT_FOLLOWUP_MSG);
+    }).catch(() => setMessage(DEFAULT_FOLLOWUP_MSG));
+  }, []);
   const willSend = Math.min(preview.followUpCount, preview.dailyRemaining);
   const blocked = !preview.liveSmsEnabled || !preview.a2pApproved || preview.killSwitch || preview.followUpCount === 0;
 

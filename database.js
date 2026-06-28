@@ -213,6 +213,26 @@ function init() {
     db.prepare("ALTER TABLE notes ADD COLUMN copy_count INTEGER DEFAULT 0").run();
   }
 
+  // Follow-up message templates
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS followup_templates (
+      id INTEGER PRIMARY KEY,
+      followup1 TEXT DEFAULT 'Hey {firstName} Just wondering if you got my last text?',
+      followup2 TEXT DEFAULT 'Hey {firstName} it''s Bailee again I know I''ve checked in before but I just wanted to stay on your radar. I''m still actively buying and can move quick if something off market pops up!',
+      unlock_days REAL DEFAULT 1
+    )
+  `);
+  db.prepare('INSERT OR IGNORE INTO followup_templates (id) VALUES (1)').run();
+
+  // Follow-up send status per contact
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS followup_status (
+      contact_phone TEXT PRIMARY KEY,
+      followup1_sent_at INTEGER DEFAULT NULL,
+      followup2_sent_at INTEGER DEFAULT NULL
+    )
+  `);
+
   // Crash recovery: any campaign stuck in 'running' gets paused on startup
   db.prepare("UPDATE campaigns SET status = 'paused' WHERE status = 'running'").run();
 
@@ -1171,6 +1191,75 @@ function getConversationDepthStats() {
   };
 }
 
+// ── Follow-up templates & status ─────────────────────────────────────────────
+
+function getFollowUpTemplates() {
+  return db.prepare('SELECT * FROM followup_templates WHERE id = 1').get();
+}
+
+function setFollowUpTemplate(field, value) {
+  // field must be 'followup1', 'followup2', or 'unlock_days'
+  const allowed = ['followup1', 'followup2', 'unlock_days'];
+  if (!allowed.includes(field)) throw new Error('Invalid follow-up field: ' + field);
+  db.prepare(`UPDATE followup_templates SET ${field} = ? WHERE id = 1`).run(value);
+}
+
+function getFollowUpStatus(contactPhone) {
+  return db.prepare('SELECT * FROM followup_status WHERE contact_phone = ?').get(contactPhone)
+    || { contact_phone: contactPhone, followup1_sent_at: null, followup2_sent_at: null };
+}
+
+function markFollowUpSent(contactPhone, slot) {
+  const col = `followup${slot}_sent_at`;
+  const now = Date.now();
+  db.prepare(`
+    INSERT INTO followup_status (contact_phone, ${col}) VALUES (?, ?)
+    ON CONFLICT(contact_phone) DO UPDATE SET ${col} = ?
+  `).run(contactPhone, now, now);
+}
+
+function resetFollowUpStatus(contactPhone) {
+  db.prepare('DELETE FROM followup_status WHERE contact_phone = ?').run(contactPhone);
+}
+
+// Contacts eligible for bulk FU1: have outbound messages, never replied, never received FU1
+function getBulkFU1Contacts() {
+  return db.prepare(`
+    SELECT DISTINCT c.phone AS contact_phone, c.name AS contact_name
+    FROM contacts c
+    JOIN conversations cv ON cv.contact_id = c.id
+    JOIN messages m ON m.conversation_id = cv.id AND m.direction = 'outbound'
+    LEFT JOIN followup_status fs ON fs.contact_phone = c.phone
+    WHERE fs.followup1_sent_at IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM messages m2
+        WHERE m2.conversation_id = cv.id AND m2.direction = 'inbound'
+      )
+      AND cv.archived = 0
+  `).all();
+}
+
+// Contacts eligible for bulk FU2: got FU1 >= unlockMs ago, no reply since, no FU2 yet
+function getBulkFU2Contacts(unlockMs) {
+  const cutoff = Date.now() - unlockMs;
+  return db.prepare(`
+    SELECT fs.contact_phone, c.name AS contact_name
+    FROM followup_status fs
+    JOIN contacts c ON c.phone = fs.contact_phone
+    JOIN conversations cv ON cv.contact_id = c.id
+    WHERE fs.followup1_sent_at IS NOT NULL
+      AND fs.followup1_sent_at <= ?
+      AND fs.followup2_sent_at IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM messages m
+        WHERE m.conversation_id = cv.id
+          AND m.direction = 'inbound'
+          AND CAST(strftime('%s', m.created_at) AS INTEGER) * 1000 > fs.followup1_sent_at
+      )
+      AND cv.archived = 0
+  `).all(cutoff);
+}
+
 module.exports = {
   init,
   addToDNC,
@@ -1199,4 +1288,7 @@ module.exports = {
   createLeadSubmission, getLeadSubmissions, getLeadSubmission, updateLeadSubmission, deleteLeadSubmission, getConversationMedia,
   getAllFollowUpContacts, getFollowUpContactsForCampaign, getCampaignConversationStats, getLeadKPIsByCampaign, getLeadPipelineStats,
   getConversationDepthStats,
+  getFollowUpTemplates, setFollowUpTemplate,
+  getFollowUpStatus, markFollowUpSent, resetFollowUpStatus,
+  getBulkFU1Contacts, getBulkFU2Contacts,
 };
