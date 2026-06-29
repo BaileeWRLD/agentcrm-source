@@ -375,35 +375,6 @@ export default function ChatWindow({ conversation, onCategoryChange, onMessageSe
           <span className="aim-btn-icon">🚫</span>
           <span className="aim-btn-label">Cold</span>
         </button>
-        {/* Follow Up 1 */}
-        <button
-          className="aim-btn"
-          style={{ flex: 1, opacity: fuStatus.followup1_sent_at ? 0.5 : 1 }}
-          disabled={!!fuStatus.followup1_sent_at}
-          title={fuStatus.followup1_sent_at ? 'Follow Up 1 already sent' : 'Send Follow Up 1'}
-          onClick={() => handleFollowUp(1)}
-        >
-          <span className="aim-btn-icon">{fuStatus.followup1_sent_at ? '✅' : '💬'}</span>
-          <span className="aim-btn-label">{fuStatus.followup1_sent_at ? 'FU1 Sent' : 'FU 1'}</span>
-        </button>
-        {/* Follow Up 2 */}
-        <button
-          className="aim-btn"
-          style={{ flex: 1, opacity: (fuStatus.followup2_sent_at || (!fu2Unlocked && !fuStatus.followup1_sent_at)) ? 0.5 : fu2Unlocked ? 1 : 0.65 }}
-          disabled={!fu2Unlocked}
-          title={
-            fuStatus.followup2_sent_at ? 'Follow Up 2 already sent' :
-            !fuStatus.followup1_sent_at ? 'Send Follow Up 1 first' :
-            fu2Countdown ? `Unlocks in ${fu2Countdown}` :
-            'Send Follow Up 2'
-          }
-          onClick={() => handleFollowUp(2)}
-        >
-          <span className="aim-btn-icon">{fuStatus.followup2_sent_at ? '✅' : fu2Countdown ? '⏳' : '💬'}</span>
-          <span className="aim-btn-label">
-            {fuStatus.followup2_sent_at ? 'FU2 Sent' : fu2Countdown ? fu2Countdown : 'FU 2'}
-          </span>
-        </button>
 <button className="aim-btn" style={{ flex: 1, color: '#cc0000' }} title="Add to DNC list"
           onClick={async () => {
             if (!window.confirm(`Add ${conversation.name || conversation.phone} to DNC?\n\nThis will:\n• Block all future SMS\n• Remove from all campaigns\n• Prevent reimport`)) return;
